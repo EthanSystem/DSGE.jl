@@ -41,7 +41,8 @@ The diagram below shows how `TTT` is extended to `TTT_aug`.
     |_________________________________|
 
 """
-function augment_states(m::Model1002, TTT::Matrix{T}, RRR::Matrix{T}, CCC::Vector{T}; regime_switching::Bool = false, reg::Int = 1) where {T<:AbstractFloat}
+function augment_states(m::Model1002, TTT::Matrix{T}, RRR::Matrix{T}, CCC::Vector{T};
+                        regime_switching::Bool = false, reg::Int = 1) where {T<:AbstractFloat}
     endo     = m.endogenous_states
     endo_new = m.endogenous_states_augmented
     exo      = m.exogenous_shocks
@@ -60,9 +61,13 @@ function augment_states(m::Model1002, TTT::Matrix{T}, RRR::Matrix{T}, CCC::Vecto
     RRR_aug = [RRR; zeros(n_states_add, n_exo)]
     CCC_aug = [CCC; zeros(n_states_add)]
 
-    for p in m.parameters
-        if !isempty(p.regimes)
-            p = ModelConstructors.toggle_regime!(p, reg)
+    for para in m.parameters
+        if !isempty(para.regimes)
+            if (haskey(get_settings(m), :model2para_regime) ? haskey(get_setting(m, :model2para_regime), para.key) : false)
+                ModelConstructors.toggle_regime!(para, reg, get_setting(m, :model2para_regime)[para.key])
+            else
+                ModelConstructors.toggle_regime!(para, reg)
+            end
         end
     end
 
@@ -208,6 +213,11 @@ function augment_states(m::Model1002, TTT::Matrix{T}, RRR::Matrix{T}, CCC::Vecto
         TTT_aug[endo_new[:e_gdpexp_t], endo_new[:e_gdpexp_t]] = m[:ρ_gdpexp]
     end
 
+    if haskey(get_settings(m), :add_iid_cond_obs_corepce_meas_err) ?
+        get_setting(m, :add_iid_cond_obs_corepce_meas_err) : false
+        TTT_aug[endo_new[:e_condcorepce_t], endo_new[:e_condcorepce_t]] = m[:ρ_condcorepce]
+    end
+
     # Fundamental inflation
     if subspec(m) in ["ss13", "ss14", "ss15", "ss16", "ss17", "ss18", "ss19"]
         betabar = exp((1-m[:σ_c] ) * m[:z_star]) * m[:β]
@@ -256,11 +266,18 @@ function augment_states(m::Model1002, TTT::Matrix{T}, RRR::Matrix{T}, CCC::Vecto
         RRR_aug[endo_new[:e_gdpexp_t], exo[:gdpexp_sh]] = 1.0
     end
 
+    if haskey(get_settings(m), :add_iid_cond_obs_corepce_meas_err) ?
+        get_setting(m, :add_iid_cond_obs_corepce_meas_err) : false
+        RRR_aug[endo_new[:e_condcorepce_t], exo[:condcorepce_sh]] = 1.0
+    end
+
     ### CCC Modifications
 
     # Expected inflation
     CCC_aug[endo_new[:Et_π_t]] = (CCC + TTT*CCC)[endo[:π_t]] # note that currently this term is not used anywhere
 
+
+    ### Ensure parameter values are in regime 1
     for para in m.parameters
         if !isempty(para.regimes)
             ModelConstructors.toggle_regime!(para, 1)

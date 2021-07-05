@@ -24,7 +24,6 @@ Pages = [
   "model_design.md",
   "special_model_types.md",
   "running_existing_model.md",
-  "advanced_usage.md",
   "input_data.md",
   "frbny_data.md",
   "implementation_details.md",
@@ -38,6 +37,7 @@ Pages = [
   "forecast_decomposition.md",
   "plotting.md",
   "algorithms.md",
+  "advanced_usage.md",
   "contributing.md",
   "MatlabToJuliaTransition.md",
   "julia_forecasting.md",
@@ -52,7 +52,9 @@ Developers of this package at the
 
 * [Michael Cai](https://github.com/caimichael)
 * [William Chen](https://github.com/chenwilliam77)
+* [Shlok Goyal](https://github.com/ShlokG)
 * [Abhi Gupta](https://github.com/abhig94)
+* [Alissa Johnson](https://github.com/alissarjohnson)
 * [Pearl Li](https://github.com/pearlzli)
 * [Ethan Matlin](https://github.com/ethanmatlin)
 * [Erica Moszkowski](https://github.com/emoszkowski)

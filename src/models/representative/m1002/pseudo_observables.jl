@@ -33,6 +33,12 @@ function init_pseudo_observable_mappings!(m::Model1002)
         end
     end
 
+    if haskey(m.settings, :add_pseudo_corepce)
+        if get_setting(m, :add_pseudo_corepce) && subspec(m) in ["ss59", "ss60", "ss61"]
+            push!(pseudo_names, :PseudoCorePCE)
+        end
+    end
+
     if haskey(m.settings, :add_NominalWageGrowth)
         if get_setting(m, :add_NominalWageGrowth)
             push!(pseudo_names, :NominalWageGrowth)
@@ -48,13 +54,13 @@ function init_pseudo_observable_mappings!(m::Model1002)
             push!(pseudo_names, :zp)
         end
     end
-    if haskey(m.settings, :add_pgap)
-        if get_setting(m, :add_pgap)
+    if haskey(m.settings, :add_altpolicy_pgap)
+        if get_setting(m, :add_altpolicy_pgap)
             push!(pseudo_names, :pgap)
         end
     end
-    if haskey(m.settings, :add_ygap)
-        if get_setting(m, :add_ygap)
+    if haskey(m.settings, :add_altpolicy_ygap)
+        if get_setting(m, :add_altpolicy_ygap)
             push!(pseudo_names, :ygap)
         end
     end
@@ -340,23 +346,23 @@ function init_pseudo_observable_mappings!(m::Model1002)
             pseudo[:ztil].longname = "ztil"
         end
     end
-    
+
     if haskey(m.settings, :add_zp)
         if get_setting(m, :add_zp)
             pseudo[:zp].name     = "zp"
             pseudo[:zp].longname = "zp"
         end
     end
-    
-    if haskey(m.settings, :add_pgap)
-        if get_setting(m, :add_pgap)
+
+    if haskey(m.settings, :add_altpolicy_pgap)
+        if get_setting(m, :add_altpolicy_pgap)
             pseudo[:pgap].name     = "pgap"
             pseudo[:pgap].longname = "pgap"
         end
     end
-    
-    if haskey(m.settings, :add_ygap)
-        if get_setting(m, :add_ygap)
+
+    if haskey(m.settings, :add_altpolicy_ygap)
+        if get_setting(m, :add_altpolicy_ygap)
             pseudo[:ygap].name     = "ygap"
             pseudo[:ygap].longname = "ygap"
         end
@@ -388,12 +394,20 @@ function init_pseudo_observable_mappings!(m::Model1002)
             pseudo[:varphiiid].longname = "varphiiid"
         end
     end
-    
+
     if haskey(m.settings, :add_pseudo_gdp)
         if get_setting(m, :add_pseudo_gdp) && subspec(m) in ["ss59", "ss60", "ss61"]
             pseudo[:PseudoGDP].name     = "GDP Growth Pseudo-observable"
             pseudo[:PseudoGDP].longname = "GDP Growth Pseudo-observable"
             pseudo[:PseudoGDP].rev_transform = loggrowthtopct_annualized_percapita
+        end
+    end
+
+    if haskey(m.settings, :add_pseudo_corepce)
+        if get_setting(m, :add_pseudo_corepce) && subspec(m) in ["ss59", "ss60", "ss61"]
+            pseudo[:PseudoCorePCE].name     = "Core PCE Pseudo-observable"
+            pseudo[:PseudoCorePCE].longname = "Core PCE Pseudo-observable"
+            pseudo[:PseudoCorePCE].rev_transform = loggrowthtopct_annualized
         end
     end
 
@@ -417,6 +431,9 @@ function init_pseudo_observable_mappings!(m::Model1002)
             pseudo[:Epi_t].longname = "Short-term Inflation Expectations"
         end
     end
+
+    # Needed to implement pseudo-measurement equation correctly
+    m <= Setting(:forward_looking_pseudo_observables, [:Expected10YearRateGap, :Expected10YearRate, :Expected10YearNaturalRate])
 
     # Add to model object
     m.pseudo_observable_mappings = pseudo

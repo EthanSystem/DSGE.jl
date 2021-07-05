@@ -242,7 +242,9 @@ function write_forecast_outputs(m::AbstractDSGEModel, input_type::Symbol,
 
                         # Initialize dataset
                         #pfile = file #.plain
-                        dset = HDF5.d_create(file, "arr", datatype(Float64), dataspace(dims...), "chunk", chunk_dims)
+                        dset = isdefined(HDF5, :create_dataset) ?
+                            HDF5.create_dataset(file, "arr", datatype(Float64), dataspace(dims...); chunk = chunk_dims) :
+                            HDF5.d_create(file, "arr", datatype(Float64), dataspace(dims...), "chunk", chunk_dims)
                     end
                 end
             end
@@ -308,6 +310,10 @@ function write_forecast_metadata(m::AbstractDSGEModel, file::JLD2.JLDFile, var::
     if haskey(m.settings, :regime_switching)
         if get_setting(m, :regime_switching)
             write(file, "regime_dates", get_setting(m, :regime_dates)) # Can retrieve regime_indices using date_indices
+            if prod == :trend
+                write(file, "time_varying_trends", haskey(get_settings(m), :time_varying_trends) ?
+                      get_setting(m, :time_varying_trends) : true)
+            end
         end
     end
 
@@ -363,11 +369,15 @@ Writes `arr` to the subarray of `file` indicated by `block_inds`.
 """
 function write_forecast_block(file, arr::Array,
                               block_inds::AbstractRange{Int64})
-    dataset = HDF5.d_open(file, "arr")
+    dataset = isdefined(HDF5, :open_dataset) ? HDF5.open_dataset(file, "arr") : HDF5.d_open(file, "arr")
     dims = size(dataset)
     ndims = length(dims)
     dataset[block_inds, fill(Colon(), ndims-1)...] = arr
-    set_dims!(dataset, dims)
+    if isdefined(HDF5, :set_extent_dims)
+        HDF5.set_extent_dims(dataset, dims)
+    else
+        HDF5.set_dims!(dataset, dims)
+    end
 end
 
 """
@@ -479,32 +489,34 @@ function read_forecast_output(m::AbstractDSGEModel, input_type::Symbol, cond_typ
         # `ndraws` x `n_regimes`, so we still need to use `repeat`.
         if product == :trend
             if reg_switch
-                regime_dates = read(file, "regime_dates")
-                date_indices = read(file, "date_indices")
-                n_regs       = length(regime_dates)
-                nperiods     = length(date_indices)
+                if !read(file, "time_varying_trends")         # if metadata time_varying_trends is false,
+                    regime_dates = read(file, "regime_dates") # then we saved on memory by exploiting fact that
+                    date_indices = read(file, "date_indices") # the trends in the state space are not time-varying
+                    n_regs       = length(regime_dates)       # but this then requires preprocessing
+                    nperiods     = length(date_indices)       # before returning foercast output
 
-                fcast_series_out = Array{eltype(fcast_series)}(undef, size(fcast_series, 1), nperiods)
+                    fcast_series_out = Array{eltype(fcast_series)}(undef, size(fcast_series, 1), nperiods)
 
-                # Figure out to which regimes the dates in date_indices belong
-                regime_inds = Vector{UnitRange{Int}}(undef, length(regime_dates))
-                trend_dates = sort(collect(keys(date_indices)))
-                for reg in 1:n_regs
-                    regime_ind = reg == n_regs ? findall(trend_dates .>= regime_dates[reg]) :
-                        findall(regime_dates[reg + 1] .> trend_dates .>= regime_dates[reg])
-                    if isnothing(regime_ind) # may be none! so just default to a dummy range
-                        regime_inds[reg] = 0:0
-                    else
-                        regime_inds[reg] = date_indices[trend_dates[regime_ind][1]]:date_indices[trend_dates[regime_ind][end]]
+                    # Figure out to which regimes the dates in date_indices belong
+                    regime_inds = Vector{UnitRange{Int}}(undef, length(regime_dates))
+                    trend_dates = sort(collect(keys(date_indices)))
+                    for reg in 1:n_regs
+                        regime_ind = reg == n_regs ? findall(trend_dates .>= regime_dates[reg]) :
+                            findall(regime_dates[reg + 1] .> trend_dates .>= regime_dates[reg])
+                        if isnothing(regime_ind) # may be none! so just default to a dummy range
+                            regime_inds[reg] = 0:0
+                        else
+                            regime_inds[reg] = date_indices[trend_dates[regime_ind][1]]:date_indices[trend_dates[regime_ind][end]]
+                        end
                     end
-                end
 
-                for (reg, reg_inds) in enumerate(regime_inds)
-                    if reg_inds != 0:0
-                        fcast_series_out[:, reg_inds] = repeat(fcast_series[:, reg], outer = (1, length(reg_inds)))
+                    for (reg, reg_inds) in enumerate(regime_inds)
+                        if reg_inds != 0:0
+                            fcast_series_out[:, reg_inds] = repeat(fcast_series[:, reg], outer = (1, length(reg_inds)))
+                        end
                     end
+                    fcast_series = fcast_series_out
                 end
-                fcast_series = fcast_series_out
             else
                 nperiods = length(read(file, "date_indices"))
                 fcast_series = repeat(fcast_series, outer = (1, nperiods))
@@ -611,7 +623,9 @@ read_regime_switching_trend(filepath, var_ind)
 ```
 
 Read only the trend output for a particular variable (e.g. for a particular
-observable). Result should be a matrix of size `ndraws` × `nvars` × `n_regimes`.
+observable). Result should be a matrix of size `ndraws` × `n_regimes` or
+`ndraws` × `n_data_periods`, depending on whether the state space
+system was time-varying or not.
 """
 function read_regime_switching_trend(filepath::String, var_ind::Int)
     whole = FileIO.load(filepath, "arr")

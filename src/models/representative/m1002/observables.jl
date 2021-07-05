@@ -417,6 +417,30 @@ function init_observable_mappings!(m::Model1002)
         end
     end
 
+    ############################################################################
+    # Pseudo-data to implement Flexible AIT
+    ############################################################################
+    if (haskey(m.settings, :add_initialize_pgap_ygap_pseudoobs) ? get_setting(m, :add_initialize_pgap_ygap_pseudoobs) : false)
+        pgap_fwd_transform = function (levels)
+            levels[:, :pgap]
+        end
+
+
+        observables[:obs_pgap] = Observable(:obs_pgap, [:pgap__INITFLEXAIT],
+                                            pgap_fwd_transform, identity,
+                                            "Average Inflation Gap",
+                                            "Average Inflation Gap from Target")
+
+        ygap_fwd_transform = function (levels)
+            levels[:, :ygap]
+        end
+
+        observables[:obs_ygap] = Observable(:obs_ygap, [:ygap__INITFLEXAIT],
+                                            ygap_fwd_transform, identity,
+                                            "Average Output Gap",
+                                            "Average Output Gap from Target")
+    end
+
     if haskey(m.settings, :first_observable)
         new_observables = OrderedDict{Symbol,Observable}()
         first_obs = get_setting(m, :first_observable)
@@ -439,6 +463,13 @@ function init_observable_mappings!(m::Model1002)
         new_observables[last_obs] = observables[last_obs]
         observables = new_observables
     end
+
+    # Needed to implement measurement equation correctly
+    m <= Setting(:forward_looking_observables,
+                 vcat([:obs_longinflation, :obs_longrate],
+                      [Symbol("obs_nominalrate$i") for i in 1:n_mon_anticipated_shocks(m)],
+                      haskey(get_settings(m), :add_anticipated_obs_gdp) && get_setting(m, :add_anticipated_obs_gdp) ?
+                      [Symbol("obs_gdp$i") for i in 1:get_setting(m, :n_anticipated_obs_gdp)] : []))
 
     m.observable_mappings = observables
 end

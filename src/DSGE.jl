@@ -3,7 +3,7 @@ isdefined(Base, :__precompile__) && __precompile__(false)
 module DSGE
     using ModelConstructors, SMC
     using Dates, Test, BenchmarkTools
-    using Distributed, Distributions, FileIO, FredData, HDF5, JLD2, LinearAlgebra
+    using BasisMatrices, Distributed, Distributions, FileIO, FredData, ForwardDiff, HDF5, JLD2, LinearAlgebra
     using Missings, Nullables, Optim, Printf, Random, RecipesBase, SparseArrays, SpecialFunctions
     using StateSpaceRoutines, StatsPlots
     using CSV, DataFrames, DataStructures, OrderedCollections
@@ -129,10 +129,8 @@ module DSGE
         decompose_forecast, decomposition_means,
 
         # altpolicy/
-        AltPolicy, taylor93, taylor99, alt_inflation,
-        ait, ait_replace_eq_entries, ait_solve, ait_eqcond,
-        ngdp, ngdp_replace_eq_entries, ngdp_solve, ngdp_eqcond,
-        zero_rate,  zero_rate_replace_eq_entries, zero_rate_solve, zero_rate_eqcond,
+        AltPolicy, EqcondEntry, setup_permanent_altpol!, default_policy, taylor93, taylor99, taylor_rule,
+        alt_inflation, ait, ngdp, zero_rate, flexible_ait, smooth_ait_gdp_alt,
 
         # scenarios/
         AbstractScenario, SingleScenario, Scenario, SwitchingScenario, ScenarioAggregate,
@@ -196,7 +194,8 @@ module DSGE
     include("abstractvarmodel.jl")
     include("defaults.jl")
     include("models/poolmodel/poolmodel.jl")
-    include("statespace.jl")
+    include("statespace_types.jl")
+    include("statespace_functions.jl")
     include("util.jl")
     include("grids.jl")
 
@@ -276,13 +275,16 @@ module DSGE
     include("decomp/meansbands.jl")
 
     include("altpolicy/altpolicy.jl")
+    include("altpolicy/default_policy.jl")
     include("altpolicy/taylor93.jl")
     include("altpolicy/taylor99.jl")
+    include("altpolicy/taylor_rule.jl")
     include("altpolicy/alt_inflation.jl")
     include("altpolicy/ait.jl")
     include("altpolicy/ngdp_target.jl")
     include("altpolicy/smooth_ait_gdp.jl")
     include("altpolicy/smooth_ait_gdp_alt.jl")
+    include("altpolicy/flexible_ait.jl")
     include("altpolicy/zero_rate.jl")
     include("altpolicy/rw.jl")
     include("altpolicy/rw_zero_rate.jl")
@@ -422,14 +424,14 @@ module DSGE
     include("models/heterogeneous/real_bond_mkup/measurement.jl")
     include("models/heterogeneous/real_bond_mkup/augment_states.jl")
 
-    include("models/heterogeneous/het_dsge/het_dsge.jl")
+    #=include("models/heterogeneous/het_dsge/het_dsge.jl")
     include("models/heterogeneous/het_dsge/steady_state.jl")
     include("models/heterogeneous/het_dsge/subspecs.jl")
     include("models/heterogeneous/het_dsge/jacobian.jl")
     include("models/heterogeneous/het_dsge/shock_loading.jl")
     include("models/heterogeneous/het_dsge/observables.jl")
     include("models/heterogeneous/het_dsge/measurement.jl")
-    include("models/heterogeneous/het_dsge/augment_states.jl")
+    include("models/heterogeneous/het_dsge/augment_states.jl")=#
 
     include("models/heterogeneous/het_dsge_gov_debt/util.jl")
     include("models/heterogeneous/het_dsge_gov_debt/het_dsge_gov_debt.jl")
@@ -448,13 +450,13 @@ module DSGE
     include("models/representative/rep_dsge_gov_debt/measurement.jl")
     include("models/representative/rep_dsge_gov_debt/augment_states.jl")
 
-    include("models/heterogeneous/het_dsge_lag/het_dsge_lag.jl")
+#=    include("models/heterogeneous/het_dsge_lag/het_dsge_lag.jl")
     include("models/heterogeneous/het_dsge_lag/steady_state.jl")
     include("models/heterogeneous/het_dsge_lag/subspecs.jl")
     include("models/heterogeneous/het_dsge_lag/jacobian.jl")
     include("models/heterogeneous/het_dsge_lag/shock_loading.jl")
     include("models/heterogeneous/het_dsge_lag/observables.jl")
-    include("models/heterogeneous/het_dsge_lag/measurement.jl")
+    include("models/heterogeneous/het_dsge_lag/measurement.jl")=#
 
     #=
     include("models/heterogeneous/het_dsge_simple_taylor/het_dsge_simple_taylor.jl")

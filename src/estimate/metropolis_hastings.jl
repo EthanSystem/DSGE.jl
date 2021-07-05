@@ -6,17 +6,20 @@ function metropolis_hastings(propdist::Distribution,
                              data::Matrix{T},
                              cc0::T,
                              cc::T;
-                             n_blocks::Int = 1,
-                             n_param_blocks::Int64 = 1,
-                             n_sim::Int64          = 100,
-                             n_burn::Int64         = 0,
-                             mhthin::Int64         = 1,
-                             adaptive_accpt::Bool  = false,
-                             α::T = 1.0,      c::T = 1.0,
-                             verbose::Symbol=:low,
-                             savepath::String = "mhsave.h5",
-                             rng::MersenneTwister = MersenneTwister(0),
-                             testing::Bool = false) where {S<:Number, T<:AbstractFloat}
+                             n_blocks::Int64        = 1,
+                             n_param_blocks::Int64  = 1,
+                             n_sim::Int64           = 100,
+                             n_burn::Int64          = 0,
+                             mhthin::Int64          = 1,
+                             adaptive_accpt::Bool   = false,
+                             α::T                   = 1.0,
+                             c::T                   = 0.5,
+                             verbose::Symbol        = :low,
+                             savepath::String       = "mhsave.h5",
+                             rng::MersenneTwister   = MersenneTwister(0),
+                             regime_switching::Bool = false,
+                             toggle::Bool           = true,
+                             testing::Bool          = false) where {S<:Number, T<:AbstractFloat}
 ```
 
 Implements the Metropolis-Hastings MCMC algorithm for sampling from the posterior
@@ -34,14 +37,17 @@ distribution of the parameters.
 
 - `n_blocks::Int = 1`: Number of blocks (for memory-management purposes)
 - `n_param_blocks::Int = 1`: Number of parameter blocks
-- `n_sim::Int    = 100`: Number of simulations. Note: # saved observations will be
-    n_sim * n_param_blocks * (n_blocks - b_burn).
+- `n_sim::Int    = 100`: Number of simulations per save block. Note: # saved observations will be
+    `n_sim * n_param_blocks * (n_blocks - b_burn)`. The # of total simulations will be
+    `n_sim * n_param_blocks * n_blocks * mhthin`.
 - `n_burn::Int   = 0`: Length of burn-in period
 - `mhthin::Int   = 1`: Thinning parameter (for mhthin = d, keep only every dth draw)
 - `adaptive_accpt::Bool = false`: Whether or not to adaptively adjust acceptance prob.
 - `α::T = 1.0`: Tuning parameter (step size) for proposal density computation in adaptive case
 - `c::T = 0.5`: Tuning parameter (mixture proportion) for proposal density computation in
     adaptive case
+- `regime_switching::Bool = false`: do the parameters involve regime-switching?
+- `toggle`: if true, toggle the fields of any regime-switching parameters to regime 1.
 - `verbose::Bool`: The desired frequency of function progress messages printed to
   standard out. One of:
 ```
@@ -59,17 +65,20 @@ function metropolis_hastings(proposal_dist::Distribution,
                              data::Matrix{T},
                              cc0::T,
                              cc::T;
-                             n_blocks::Int64       = 1,
-                             n_param_blocks::Int64 = 1,  # TODO: give these kwargs better names
-                             n_sim::Int64          = 100,
-                             n_burn::Int64         = 0,
-                             mhthin::Int64         = 1,
-                             adaptive_accpt::Bool  = false,
-                             α::T = 1.0,      c::T = 0.5,
-                             verbose::Symbol       = :low,
-                             savepath::String      = "mhsave.h5",
-                             rng::MersenneTwister  = MersenneTwister(0),
-                             testing::Bool = false) where {S<:Number, T<:AbstractFloat}
+                             n_blocks::Int64        = 1,
+                             n_param_blocks::Int64  = 1,  # TODO: give these kwargs better names
+                             n_sim::Int64           = 100,
+                             n_burn::Int64          = 0,
+                             mhthin::Int64          = 1,
+                             adaptive_accpt::Bool   = false,
+                             α::T                   = 1.0,
+                             c::T                   = 0.5,
+                             verbose::Symbol        = :low,
+                             savepath::String       = "mhsave.h5",
+                             rng::MersenneTwister   = MersenneTwister(0),
+                             regime_switching::Bool = false,
+                             toggle::Bool           = true,
+                             testing::Bool          = false) where {S<:Number, T<:AbstractFloat}
 
     # If testing, set the random seeds at fixed numbers
     if testing
@@ -94,11 +103,17 @@ function metropolis_hastings(proposal_dist::Distribution,
         end
     end
 
-    # New feature: Parameter Blocking
-    free_para_inds = findall([!θ.fixed for θ in parameters])
-    n_free_para    = length(free_para_inds)
-    n_params       = length(parameters)
-    blocks_all     = SMC.generate_param_blocks(n_free_para, n_param_blocks)
+    # Parameter Blocking
+    free_para_inds = ModelConstructors.get_free_para_inds(parameters;
+                                                          regime_switching = regime_switching, toggle = toggle)
+    n_params       = regime_switching ? n_parameters_regime_switching(parameters) : length(parameters)
+    if n_param_blocks == 1
+        blocks_free = Vector{Int}[free_para_inds]
+        reblock     = false # to randomly block parameters again or not?
+    else # Actual parameter blocking will occur in the MH loop
+        n_free_para = length(free_para_inds)
+        reblock     = true
+    end
 
     # Report number of blocks that will be used
     println(verbose, :low, "Blocks: $n_blocks")
@@ -115,9 +130,12 @@ function metropolis_hastings(proposal_dist::Distribution,
     # Open HDF5 file for saving parameter draws
     simfile     = h5open(savepath, "w")
     n_saved_obs = n_sim * n_param_blocks * (n_blocks - n_burn)
-    parasim     = d_create(simfile, "mhparams", datatype(Float64),
-                           dataspace(n_saved_obs, n_params),
-                           "chunk", (n_sim * n_param_blocks, n_params))
+    parasim     = isdefined(HDF5, :create_dataset) ?
+        HDF5.create_dataset(simfile, "mhparams", datatype(Float64),
+                            dataspace(n_saved_obs, n_params);
+                            chunk = (n_sim * n_param_blocks, n_params)) :
+                                HDF5.d_create(simfile, "mhparams", datatype(Float64),
+                                              dataspace(n_saved_obs, n_params), "chunk", (n_sim * n_param_blocks, n_params))
 
     # Keep track of how long metropolis_hastings has been sampling
     total_sampling_time = 0.
@@ -129,7 +147,14 @@ function metropolis_hastings(proposal_dist::Distribution,
 
         for j = 1:(n_sim * mhthin)
 
-            for (k, block_a) in enumerate(blocks_all)
+            if reblock # Parameter blocking by randomly drawing blocks every MH draw
+                blocks_free = SMC.generate_free_blocks(n_free_para, n_param_blocks)
+                for block_f in blocks_free
+                    sort!(block_f)
+                end
+            end
+
+            for (k, block_a) in enumerate(blocks_free)
 
                 # Draw para_new from the proposal distribution
                 para_subset = para_old[block_a]
@@ -232,7 +257,9 @@ end
 """
 ```
 metropolis_hastings(propdist::Distribution, m::Union{AbstractDSGEModel,AbstractVARModel},
-    data::Matrix{T}, cc0::T, cc::T; verbose::Symbol = :low) where {T<:AbstractFloat}
+    data::Matrix{T}, cc0::T, cc::T; filestring_addl::Vector{String} = [],
+    regime_switching::Bool = false, toggle::Bool = false,
+    verbose::Symbol = :low) where {T<:AbstractFloat}
 ```
 
 Wrapper function for DSGE models which calls Metropolis-Hastings MCMC algorithm for
@@ -256,6 +283,10 @@ sampling from the posterior distribution of the parameters.
    - `:low`: Status updates provided at each block.
    - `:high`: Status updates provided at each draw.
 ```
+
+- `filestring_addl`: additional strings to add to the names of output files
+- `regime_switching`: do the parameters involve regime-switching?
+- `toggle`: if true, toggle the fields of any regime-switching parameters to regime 1.
 """
 function metropolis_hastings(propdist::Distribution,
                              m::Union{AbstractDSGEModel,AbstractVARModel},
@@ -263,6 +294,7 @@ function metropolis_hastings(propdist::Distribution,
                              cc0::T,
                              cc::T;
                              filestring_addl::Vector{String} = Vector{String}(undef, 0),
+                             regime_switching::Bool = false, toggle::Bool = true,
                              verbose::Symbol = :low) where {T<:AbstractFloat}
 
     n_blocks = n_mh_blocks(m)
@@ -280,11 +312,13 @@ function metropolis_hastings(propdist::Distribution,
     savepath = rawpath(m, "estimate", "mhsave.h5", filestring_addl)
 
     # To check: Defaulting to using Chandrasekhar recursions if no missing data
-    use_chand_recursion = !any(isnan.(data))
+    # and not regime-switching (Chandrasekhar recursions have not been extended yet
+    # for regime-switching)
+    use_chand_recursion = !any(isnan.(data)) && !regime_switching
 
     loglikelihood = if isa(m, AbstractDSGEModel)
         function _loglikelihood_dsge(p::ParameterVector, data::Matrix{Float64})::Float64
-            update!(m, p)
+            update!(m, p; regime_switching = regime_switching, toggle = toggle)
             likelihood(m, data; sampler = true, catch_errors = false,
                        use_chand_recursion = use_chand_recursion)
         end
@@ -298,6 +332,7 @@ function metropolis_hastings(propdist::Distribution,
     return metropolis_hastings(propdist, loglikelihood, get_parameters(m), data, cc0, cc;
                                n_blocks = n_blocks, n_param_blocks = n_param_blocks,
                                adaptive_accpt = adaptive_accpt, c = c, α = α, n_sim = n_sim,
-                               n_burn = n_burn, mhthin = mhthin, verbose = verbose,
+                               n_burn = n_burn, mhthin = mhthin, toggle = toggle,
+                               regime_switching = regime_switching, verbose = verbose,
                                savepath = savepath, rng = rng, testing = testing)
 end

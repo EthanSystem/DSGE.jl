@@ -33,7 +33,11 @@ function eqcond(m::Model1002, reg::Int)
 
     for para in m.parameters
         if !isempty(para.regimes)
-            ModelConstructors.toggle_regime!(para, reg)
+            if (haskey(get_settings(m), :model2para_regime) ? haskey(get_setting(m, :model2para_regime), para.key) : false)
+                ModelConstructors.toggle_regime!(para, reg, get_setting(m, :model2para_regime)[para.key])
+            else
+                ModelConstructors.toggle_regime!(para, reg)
+            end
         end
     end
 
@@ -478,7 +482,6 @@ function eqcond(m::Model1002, reg::Int)
         # will hit in two periods), and the equations are set up so that rm_tl2 last period
         # will feed into rm_tl1 this period (and so on for other numbers), and last period's
         # rm_tl1 will feed into the rm_t process (and affect the Taylor Rule this period).
-
         Γ1[eq[:eq_rm], endo[:rm_tl1]]   = 1.
         Γ0[eq[:eq_rml1], endo[:rm_tl1]] = 1.
         Ψ[eq[:eq_rml1], exo[:rm_shl1]]  = 1.
@@ -489,6 +492,14 @@ function eqcond(m::Model1002, reg::Int)
                 Γ0[eq[Symbol("eq_rml$i")], endo[Symbol("rm_tl$i")]]     = 1.
                 Ψ[eq[Symbol("eq_rml$i")], exo[Symbol("rm_shl$i")]]      = 1.
             end
+
+            #=if (haskey(m.settings, :flexible_ait_policy_change) ? get_setting(m, :flexible_ait_policy_change) : false)
+                if get_setting(m, :regime_dates)[reg] >= get_setting(m, :flexible_ait_policy_change_date)
+                    Γ1[eq[:eq_rml1], endo[:rm_tl2]] = 0.
+                    Γ0[eq[:eq_rml2], endo[:rm_tl2]] = 1.
+                    Ψ[eq[:eq_rml2],  exo[:rm_shl2]] = 1.
+                end
+            end=#
         end
     end
 
@@ -628,11 +639,11 @@ function eqcond(m::Model1002, reg::Int)
    # (1) Regime-switching won't work otherwise
    # (2) we may want to define the their values at the beginning of the forecast period
    #     rather than just when we start using the alt rule.
-   if haskey(m.settings, :add_pgap) ? get_setting(m, :add_pgap) : false
+   if haskey(m.settings, :add_altpolicy_pgap) ? get_setting(m, :add_altpolicy_pgap) : false
        Γ0[eq[:eq_pgap], endo[:pgap_t]]  =  1.
-       if haskey(m.settings, :replace_eqcond_func_dict)
-           if reg >= minimum(keys(get_setting(m, :replace_eqcond_func_dict))) &&
-               reg <= maximum(keys(get_setting(m, :replace_eqcond_func_dict))) &&
+       if haskey(m.settings, :regime_eqcond_info)
+           if reg >= minimum(keys(get_setting(m, :regime_eqcond_info))) &&
+               reg <= maximum(keys(get_setting(m, :regime_eqcond_info))) &&
                haskey(m.settings, :pgap_type)
                if get_setting(m, :pgap_type) == :ngdp
                    Γ0[eq[:eq_pgap], endo[:pgap_t]] =  1.
@@ -654,24 +665,32 @@ function eqcond(m::Model1002, reg::Int)
                    Γ0[eq[:eq_pgap], endo[:pgap_t]] = 1.
                    Γ0[eq[:eq_pgap], endo[:π_t]]    = -1.
                    Γ1[eq[:eq_pgap], endo[:pgap_t]] = ρ_pgap
-               elseif get_setting(m, :pgap_type) in [:smooth_ait_gdp, :smooth_ait_gdp_alt, :rw]
+               elseif get_setting(m, :pgap_type) in [:smooth_ait_gdp, :smooth_ait_gdp_alt, :flexible_ait, :rw]
                    Thalf = haskey(get_settings(m), :ait_Thalf) ? get_setting(m, :ait_Thalf) : 10.
                    ρ_pgap = exp(log(0.5) / Thalf)
                    Γ0[eq[:eq_pgap], endo[:pgap_t]] = 1.
                    Γ0[eq[:eq_pgap], endo[:π_t]]    = -1.
                    Γ1[eq[:eq_pgap], endo[:pgap_t]] = ρ_pgap
                end
+               if (haskey(get_settings(m), :add_initialize_pgap_ygap_pseudoobs) ?
+                   get_setting(m, :add_initialize_pgap_ygap_pseudoobs) : false)
+                   Ψ[eq[:eq_pgap], exo[:pgap_sh]] = 1.
+               end
            end
        end
+       if (haskey(get_settings(m), :add_initialize_pgap_ygap_pseudoobs) ?
+                   get_setting(m, :add_initialize_pgap_ygap_pseudoobs) : false)
+                   Ψ[eq[:eq_pgap], exo[:pgap_sh]] = 1.
+               end
    end
 
-   if haskey(m.settings, :add_ygap) ? get_setting(m, :add_ygap) : false
+   if haskey(m.settings, :add_altpolicy_ygap) ? get_setting(m, :add_altpolicy_ygap) : false
        Γ0[eq[:eq_ygap], endo[:ygap_t]]  =  1.
-       if haskey(m.settings, :replace_eqcond_func_dict)
-           if reg >= minimum(keys(get_setting(m, :replace_eqcond_func_dict))) &&
-               reg <= maximum(keys(get_setting(m, :replace_eqcond_func_dict))) &&
+       if haskey(m.settings, :regime_eqcond_info)
+           if reg >= minimum(keys(get_setting(m, :regime_eqcond_info))) &&
+               reg <= maximum(keys(get_setting(m, :regime_eqcond_info))) &&
                haskey(m.settings, :ygap_type)
-               if get_setting(m, :ygap_type) in [:smooth_ait_gdp, :smooth_ait_gdp_alt, :rw]
+               if get_setting(m, :ygap_type) in [:smooth_ait_gdp, :smooth_ait_gdp_alt, :flexible_ait, :rw]
                    Thalf  = haskey(get_settings(m), :gdp_Thalf) ? get_setting(m, :gdp_Thalf) : 10.
                    ρ_ygap = exp(log(0.5) / Thalf)
 
@@ -683,17 +702,25 @@ function eqcond(m::Model1002, reg::Int)
                    Γ0[eq[:eq_ygap], endo[:z_t]]    = -1.
                    Γ1[eq[:eq_ygap], endo[:y_t]]    = -1.
                end
+               if (haskey(get_settings(m), :add_initialize_pgap_ygap_pseudoobs) ?
+                   get_setting(m, :add_initialize_pgap_ygap_pseudoobs) : false)
+                   Ψ[eq[:eq_ygap], exo[:ygap_sh]] = 1.
+               end
            end
        end
+       if (haskey(get_settings(m), :add_initialize_pgap_ygap_pseudoobs) ?
+                   get_setting(m, :add_initialize_pgap_ygap_pseudoobs) : false)
+                   Ψ[eq[:eq_ygap], exo[:ygap_sh]] = 1.
+               end
    end
 
    if haskey(m.settings, :add_rw) ? get_setting(m, :add_rw) : false
        Γ0[eq[:eq_rw], endo[:rw_t]]     =  1.
        Γ0[eq[:eq_Rref], endo[:Rref_t]] =  1.
 
-       if haskey(m.settings, :replace_eqcond_func_dict)
-           if reg >= minimum(keys(get_setting(m, :replace_eqcond_func_dict))) &&
-               reg <= maximum(keys(get_setting(m, :replace_eqcond_func_dict))) &&
+       if haskey(m.settings, :regime_eqcond_info)
+           if reg >= minimum(keys(get_setting(m, :regime_eqcond_info))) &&
+               reg <= maximum(keys(get_setting(m, :regime_eqcond_info))) &&
                haskey(m.settings, :Rref_type)
 
                ρ_rw = haskey(get_settings(m), :ρ_rw) ? get_setting(m, :ρ_rw) : 0.93
@@ -711,7 +738,7 @@ function eqcond(m::Model1002, reg::Int)
                    C[eq[:eq_Rref]]                 = 0.
                    Γ0[eq[:eq_Rref], endo[:rw_t]]   = -1.
 
-               elseif get_setting(m, :Rref_type) in [:smooth_ait_gdp, :smooth_ait_gdp_alt, :rw]
+               elseif get_setting(m, :Rref_type) in [:smooth_ait_gdp, :smooth_ait_gdp_alt, :flexible_ait, :rw]
 
                    ait_Thalf = haskey(get_settings(m), :ait_Thalf) ? get_setting(m, :ait_Thalf) : 10.
                    gdp_Thalf = haskey(get_settings(m), :gdp_Thalf) ? get_setting(m, :gdp_Thalf) : 10.
@@ -732,29 +759,25 @@ function eqcond(m::Model1002, reg::Int)
        end
    end
 
-   if haskey(m.settings, :replace_eqcond) ? get_setting(m, :replace_eqcond) : false
-       if haskey(m.settings, :replace_eqcond_func_dict)
-           if haskey(get_setting(m, :replace_eqcond_func_dict), reg) && reg != get_setting(m, :n_regimes)
-               Γ0, Γ1, C, Ψ, Π = get_setting(m, :replace_eqcond_func_dict)[reg](m, Γ0, Γ1, C, Ψ, Π)
-           end
-       end
-   end
-
-   if haskey(m.settings, :track_pgap)
-       if get_setting(m, :track_pgap)
-           if get_setting(m, :pgap_type) in [:smooth_ait_gdp, :smooth_ait, :ait, :smooth_ait_gdp_alt]
+   if haskey(m.settings, :add_pgap)
+       if get_setting(m, :add_pgap)
+           if get_setting(m, :pgap_type) in [:smooth_ait_gdp, :smooth_ait, :ait, :smooth_ait_gdp_alt, :flexible_ait]
                Thalf = haskey(m.settings, :ait_Thalf) ? get_setting(m, :ait_Thalf) : 10
                ρ_pgap = exp(log(0.5) / Thalf)
                Γ0[eq[:eq_pgap], endo[:pgap_t]] = 1.
                Γ0[eq[:eq_pgap], endo[:π_t]]    = -1.
                Γ1[eq[:eq_pgap], endo[:pgap_t]] = ρ_pgap
+               if (haskey(get_settings(m), :add_initialize_pgap_ygap_pseudoobs) ?
+                   get_setting(m, :add_initialize_pgap_ygap_pseudoobs) : false)
+                   Ψ[eq[:eq_pgap], exo[:pgap_sh]] = 1.
+               end
            end
        end
    end
 
-   if haskey(m.settings, :track_ygap)
-       if get_setting(m, :track_ygap)
-           if get_setting(m, :ygap_type) in [:smooth_ait_gdp, :smooth_ait, :ait, :smooth_ait_gdp_alt]
+   if haskey(m.settings, :add_ygap)
+       if get_setting(m, :add_ygap)
+           if get_setting(m, :ygap_type) in [:smooth_ait_gdp, :smooth_ait_gdp_alt, :flexible_ait]
                Thalf  = haskey(get_settings(m), :gdp_Thalf) ? get_setting(m, :gdp_Thalf) : 10.
                ρ_ygap = exp(log(0.5) / Thalf)
 
@@ -765,26 +788,23 @@ function eqcond(m::Model1002, reg::Int)
                Γ0[eq[:eq_ygap], endo[:y_t]]    = -1.
                Γ0[eq[:eq_ygap], endo[:z_t]]    = -1.
                Γ1[eq[:eq_ygap], endo[:y_t]]    = -1.
+               if (haskey(get_settings(m), :add_initialize_pgap_ygap_pseudoobs) ?
+                   get_setting(m, :add_initialize_pgap_ygap_pseudoobs) : false)
+                   Ψ[eq[:eq_ygap], exo[:ygap_sh]] = 1.
+               end
            end
        end
    end
 
-   if haskey(m.settings, :track_ygap)
-       if get_setting(m, :track_ygap)
-           if get_setting(m, :ygap_type) in [:smooth_ait_gdp, :smooth_ait, :ait]
-               Thalf  = haskey(get_settings(m), :gdp_Thalf) ? get_setting(m, :gdp_Thalf) : 10.
-               ρ_ygap = exp(log(0.5) / Thalf)
-
-               Γ0[eq[:eq_ygap], endo[:ygap_t]] = 1.
-               # Γ0[eq[:eq_ygap], endo[:π_t]]    = -1.
-               Γ1[eq[:eq_ygap], endo[:ygap_t]] = ρ_ygap
-
-               Γ0[eq[:eq_ygap], endo[:y_t]]    = -1.
-               Γ0[eq[:eq_ygap], endo[:z_t]]    = -1.
-               Γ1[eq[:eq_ygap], endo[:y_t]]    = -1.
+   # If running temporary alterantive policies, we update the gensys matrices here.
+   # This step MUST be the last block of code prior to switching parameter values back to the first regime.
+   #=if haskey(m.settings, :replace_eqcond) ? get_setting(m, :replace_eqcond) : false
+       if haskey(m.settings, :regime_eqcond_info)
+           if haskey(get_setting(m, :regime_eqcond_info), reg)
+               Γ0, Γ1, C, Ψ, Π = get_setting(m, :regime_eqcond_info)[reg].alternative_policy.eqcond(m, Γ0, Γ1, C, Ψ, Π)
            end
        end
-   end
+   end=#
 
    for para in m.parameters
         if !isempty(para.regimes)
